@@ -1,0 +1,187 @@
+# Alfresco Community 26.2 + pgvector, enough to run the bridge end to end.
+#
+# Adapted from Alfresco/acs-deployment (docker-compose/community-compose.yaml).
+# Trimmed to what the bridge needs — no Share, no Content App, no proxy — and
+# with three deliberate changes:
+#
+#   * named volumes, because the upstream compose uses an anonymous volume for
+#     alf_data and none at all for PostgreSQL, so data dies with the stack;
+#   * a memory limit and fixed heap on Elasticsearch, which otherwise sizes its
+#     heap to half the host's RAM;
+#   * a mounted activemq.xml, because the image ships with only the openwire
+#     connector enabled and the Event2 listener needs STOMP.
+#
+# Needs about 6 GB available to Docker.
+#
+#   scripts/enable-stomp.sh      # once, generates config/activemq.xml
+#   docker compose up -d
+#
+name: acubens-alfresco-semantic-search
+
+services:
+  alfresco:
+    image: docker.io/alfresco/alfresco-content-repository-community:26.2.0
+    mem_limit: 2500m
+    environment:
+      JAVA_TOOL_OPTIONS: >-
+        -Dencryption.keystore.type=JCEKS
+        -Dencryption.cipherAlgorithm=DESede/CBC/PKCS5Padding
+        -Dencryption.keyAlgorithm=DESede
+        -Dencryption.keystore.location=/usr/local/tomcat/shared/classes/alfresco/extension/keystore/keystore
+        -Dmetadata-keystore.password=mp6yc0UD9e
+        -Dmetadata-keystore.aliases=metadata
+        -Dmetadata-keystore.metadata.password=oKIWzVdEdA
+        -Dmetadata-keystore.metadata.algorithm=DESede
+      JAVA_OPTS: >-
+        -Ddb.driver=org.postgresql.Driver
+        -Ddb.username=alfresco
+        -Ddb.password=alfresco
+        -Ddb.url=jdbc:postgresql://postgres:5432/alfresco
+        -Dsolr.secureComms=secret
+        -Dsolr.sharedSecret=secret
+        -Dindex.subsystem.name=elasticsearch
+        -Delasticsearch.createIndexIfNotExists=true
+        -Delasticsearch.host=elasticsearch
+        -Delasticsearch.port=9200
+        -Dalfresco.host=localhost
+        -Dalfresco.port=8080
+        -Dcsrf.filter.enabled=false
+        -Dmessaging.broker.url="failover:(nio://activemq:61616)?timeout=3000&jms.useCompression=true"
+        -Dmessaging.broker.username=admin
+        -Dmessaging.broker.password=admin
+        -Ddeployment.method=DOCKER_COMPOSE
+        -DlocalTransform.core-aio.url=http://transform:8090/
+        -XX:MinRAMPercentage=50
+        -XX:MaxRAMPercentage=80
+    ports:
+      - "8080:8080"
+    volumes:
+      - alf-data:/usr/local/tomcat/alf_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/alfresco/api/-default-/public/alfresco/versions/1/probes/-ready-"]
+      interval: 30s
+      timeout: 3s
+      retries: 5
+      start_period: 1m
+    depends_on:
+      postgres: { condition: service_healthy }
+      activemq: { condition: service_healthy }
+      elasticsearch: { condition: service_healthy }
+
+  transform:
+    image: docker.io/alfresco/alfresco-transform-core-aio:5.4.5
+    mem_limit: 1536m
+    environment:
+      JAVA_OPTS: "-XX:MinRAMPercentage=50 -XX:MaxRAMPercentage=80"
+    ports:
+      - "8090:8090"
+    healthcheck:
+      # /ready, not /actuator/health: the aggregate actuator endpoint reports
+      # DOWN with HTTP 503 on a healthy service while its own liveness and
+      # readiness groups both report UP.
+      test: ["CMD", "curl", "-f", "http://localhost:8090/ready"]
+      interval: 20s
+      timeout: 2s
+      retries: 3
+      start_period: 10s
+
+  postgres:
+    image: postgres:17.9
+    mem_limit: 512m
+    environment:
+      POSTGRES_USER: alfresco
+      POSTGRES_PASSWORD: alfresco
+      POSTGRES_DB: alfresco
+    command: postgres -c max_connections=300 -c log_min_messages=LOG
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $$POSTGRES_DB -U $$POSTGRES_USER"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  elasticsearch:
+    image: elasticsearch:8.17.10
+    mem_limit: 2g
+    environment:
+      - xpack.security.enabled=false
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\\(green\\|yellow\\)'"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  batch-indexing:
+    image: docker.io/alfresco/alfresco-elasticsearch-batch-indexing:5.9.0
+    mem_limit: 1g
+    environment:
+      JAVA_OPTS: "-Xms256m -Xmx768m"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/alfresco
+      SPRING_DATASOURCE_USERNAME: alfresco
+      SPRING_DATASOURCE_PASSWORD: alfresco
+      SPRING_ELASTICSEARCH_REST_URIS: http://elasticsearch:9200
+      ALFRESCO_ACCEPTEDCONTENTMEDIATYPESCACHE_BASEURL: http://transform:8090/transform/config
+      ALFRESCO_ACS_URL: http://alfresco:8080
+      ALFRESCO_CONTENT_TRANSFORM_SHAREDSECRET: secret
+      ALFRESCO_REINDEX_CONTINUOUS_POLLINGINTERVAL: 15s
+    depends_on:
+      alfresco: { condition: service_healthy }
+      elasticsearch: { condition: service_healthy }
+      transform: { condition: service_healthy }
+
+  activemq:
+    image: docker.io/alfresco/alfresco-activemq:6.2.9-jre17-rockylinux8
+    mem_limit: 1g
+    environment:
+      - ACTIVEMQ_ADMIN_LOGIN=admin
+      - ACTIVEMQ_ADMIN_PASSWORD=admin
+    ports:
+      - "61616:61616"   # openwire
+      - "61613:61613"   # STOMP — needs config/activemq.xml, see scripts/
+      - "8161:8161"     # web console
+    volumes:
+      - amq-data:/opt/activemq/data
+      # Generated by scripts/enable-stomp.sh. The image ships with only the
+      # openwire connector active; the others are commented out upstream.
+      - ./config/activemq.xml:/opt/activemq/conf/activemq.xml:ro
+    healthcheck:
+      test: ["CMD", "/opt/activemq/bin/activemq", "query", "--objname", "type=Broker,brokerName=*,service=Health", "|", "grep", "Good"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # The vector store. Separate from Alfresco's own PostgreSQL on purpose: a
+  # different lifecycle, a different backup policy, and no competition for the
+  # repository's connection pool (which defaults to 275 of 300 connections).
+  pgvector:
+    image: pgvector/pgvector:pg17
+    mem_limit: 512m
+    environment:
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: rag
+      POSTGRES_DB: rag
+    ports:
+      - "5433:5432"
+    volumes:
+      - rag-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $$POSTGRES_DB -U $$POSTGRES_USER"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  alf-data:
+  pg-data:
+  es-data:
+  amq-data:
+  rag-data:

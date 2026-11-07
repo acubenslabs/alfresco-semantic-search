@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alfresco-semantic-search"
+version = "0.1.0"
+description = "Permission-aware semantic search for Alfresco using AI embeddings, PostgreSQL and pgvector"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+authors = [{ name = "Acubens", email = "info@acubens.com.ar" }]
+keywords = [
+  "alfresco", "ecm", "semantic-search", "rag", "pgvector",
+  "event2", "permissions", "embeddings", "document-management",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Office/Business",
+]
+# The core has no third-party dependencies: the Alfresco client, the Event2
+# STOMP listener, chunking and the OpenAI call all use the standard library.
+dependencies = []
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.1"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.urls]
+Homepage = "https://github.com/acubens/acubens-alfresco-semantic-search"
+Issues = "https://github.com/acubens/acubens-alfresco-semantic-search/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 96
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
