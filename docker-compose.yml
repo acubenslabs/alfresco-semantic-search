@@ -16,7 +16,7 @@
 #   scripts/enable-stomp.sh      # once, generates config/activemq.xml
 #   docker compose up -d
 #
-name: acubens-alfresco-semantic-search
+name: alfresco-semantic-search
 
 services:
   alfresco:

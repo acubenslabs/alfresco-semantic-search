@@ -19,6 +19,17 @@ Built on AI embeddings, PostgreSQL and
 Alfresco: the repository is consumed through its public API and its event
 stream, so upgrading it does not break this.
 
+## Demo
+
+[![Alfresco Semantic Search — demo](docs/demo-thumb.png)](https://www.youtube.com/watch?v=eej4AtKW8w4)
+
+The same question, asked by two different users, returns a different set of
+documents — because Alfresco decides what each of them may read, not the
+assistant. One minute, Spanish captions.
+
+The assistant in the video is a client deployment; what is published here is
+the retrieval component underneath it.
+
 ```
 Event2 ──► classify ──► extract ──► chunk ──► embed ──► pgvector
                                                             │
@@ -85,8 +96,8 @@ in Alfresco takes effect on the next query, with no sync to wait for.
 Needs Docker with ~6 GB available, and Python 3.11+.
 
 ```bash
-git clone https://github.com/acubens/acubens-alfresco-semantic-search
-cd acubens-alfresco-semantic-search
+git clone https://github.com/acubenslabs/alfresco-semantic-search
+cd alfresco-semantic-search
 
 # The alfresco-activemq image ships with only the openwire connector enabled;
 # this extracts its own activemq.xml and uncomments STOMP.
